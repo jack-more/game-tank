@@ -1,0 +1,20 @@
+{
+  "name": "Game Tank",
+  "short_name": "Game Tank",
+  "description": "A premium AI emulator cockpit for watching and intervening in a lightweight game-playing agent.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "landscape-primary",
+  "background_color": "#93aec6",
+  "theme_color": "#93aec6",
+  "categories": ["games", "entertainment", "productivity"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
