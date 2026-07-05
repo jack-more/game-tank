@@ -1879,3 +1879,39 @@ button:disabled {
     padding-bottom: clamp(120px, 24vh, 170px);
   }
 }
+
+.wake-pill {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  border: 1px solid rgb(140 245 200 / 50%);
+  border-radius: 999px;
+  background: rgb(5 16 24 / 88%);
+  backdrop-filter: blur(14px);
+  color: var(--signal);
+  padding: 10px 18px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 50%), 0 0 30px rgb(140 245 200 / 18%);
+  cursor: pointer;
+  animation: wake-bob 2.4s ease-in-out infinite;
+}
+
+@keyframes wake-bob {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  50% {
+    transform: translateX(-50%) translateY(4px);
+  }
+}

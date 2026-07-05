@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Nostalgist } from "nostalgist";
 import { buttonLabel, nextAgentAction, wantsGuardrail } from "./agent";
+import { hasSuspendedAudio, resumeAllAudio } from "./audio";
 import {
   addProfileEvent,
   createProfile,
@@ -112,6 +113,7 @@ export default function App() {
     localStorage.getItem(VIEW_KEY) === "console" ? "console" : "tank",
   );
   const [isPip, setIsPip] = useState(false);
+  const [needsWake, setNeedsWake] = useState(false);
   const [status, setStatus] = useState("Standby");
   const [romSize, setRomSize] = useState<number>();
   const [commandDraft, setCommandDraft] = useState("");
@@ -127,6 +129,7 @@ export default function App() {
   const sramInputRef = useRef<HTMLInputElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const autoLaunchRef = useRef(false);
+  const launchTokenRef = useRef(0);
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeId) ?? profiles[0],
@@ -157,6 +160,16 @@ export default function App() {
       ? `${playing ? "▶" : "⏸"} ${activeProfile?.gameName ?? "Game Tank"} · Game Tank`
       : "Game Tank";
   }, [isLoaded, activeProfile?.mode, activeProfile?.gameName]);
+
+  useEffect(() => {
+    if (!isLoaded) {
+      setNeedsWake(false);
+      return;
+    }
+
+    const timer = window.setInterval(() => setNeedsWake(hasSuspendedAudio()), 800);
+    return () => window.clearInterval(timer);
+  }, [isLoaded]);
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -299,6 +312,7 @@ export default function App() {
   async function launchProfile(profile = activeProfile, options: LaunchOptions = {}) {
     if (!profile?.romKey || !canvasRef.current) return;
 
+    const token = ++launchTokenRef.current;
     setIsLaunching(true);
     setStatus("Launching core");
 
@@ -325,6 +339,7 @@ export default function App() {
         retroarchConfig: {
           savestate_thumbnail_enable: true,
           video_smooth: false,
+          audio_sync: false,
         },
         style: {
           width: "100%",
@@ -332,6 +347,11 @@ export default function App() {
           imageRendering: "pixelated",
         },
       });
+
+      if (token !== launchTokenRef.current) {
+        void instance.exit();
+        return;
+      }
 
       emulatorRef.current = instance;
 
@@ -378,6 +398,7 @@ export default function App() {
 
   function switchTank(profile: AgentProfile) {
     if (profile.id === activeProfile.id) return;
+    launchTokenRef.current += 1;
     setActiveId(profile.id);
     setIsLoaded(false);
     setStatus("Standby");
@@ -702,11 +723,14 @@ export default function App() {
   }
 
   function addProfile() {
+    launchTokenRef.current += 1;
     const profile = createProfile(profiles.length + 1);
     setProfiles((current) => [profile, ...current]);
     setActiveId(profile.id);
     setIsLoaded(false);
+    setStatus("Standby");
     void emulatorRef.current?.exit();
+    emulatorRef.current = null;
   }
 
   function addQueueItem(text: string, source = "Command") {
@@ -1223,6 +1247,19 @@ export default function App() {
           </section>
         </aside>
       </div>
+
+      {needsWake && (
+        <button
+          className="wake-pill"
+          onClick={() => {
+            resumeAllAudio();
+            setNeedsWake(false);
+          }}
+        >
+          <Play size={13} />
+          Tap anywhere for sound
+        </button>
+      )}
 
       {view === "tank" && (
         <>
