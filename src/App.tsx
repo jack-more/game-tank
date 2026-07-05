@@ -5,7 +5,6 @@ import {
   ArrowRight,
   ArrowUp,
   Bot,
-  Box,
   Circle,
   Download,
   Fish,
@@ -125,6 +124,7 @@ export default function App() {
   const screenObservationRef = useRef<ScreenObservation | undefined>(undefined);
   const romInputRef = useRef<HTMLInputElement | null>(null);
   const stateInputRef = useRef<HTMLInputElement | null>(null);
+  const sramInputRef = useRef<HTMLInputElement | null>(null);
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const autoLaunchRef = useRef(false);
 
@@ -679,6 +679,28 @@ export default function App() {
     );
   }
 
+  async function importSram(file?: File) {
+    if (!file) return;
+
+    const sramKey = `${activeProfile.id}.sram`;
+    await putBlob(sramKey, file);
+
+    updateActiveProfile((profile) =>
+      addProfileEvent(
+        { ...profile, lastSramKey: sramKey, updatedAt: Date.now() },
+        "save",
+        `Battery save imported: ${file.name}. Relaunching with it.`,
+      ),
+    );
+
+    if (activeProfile.romKey) {
+      window.setTimeout(
+        () => void launchProfile({ ...activeProfile, lastSramKey: sramKey }, { autopilot: true }),
+        60,
+      );
+    }
+  }
+
   function addProfile() {
     const profile = createProfile(profiles.length + 1);
     setProfiles((current) => [profile, ...current]);
@@ -930,8 +952,9 @@ export default function App() {
 
                 {!isLoaded && (
                   <div className="empty-screen">
-                    <Box size={28} />
-                    <strong>{isLaunching ? "Preparing core" : "Drop in a ROM (GBA, GB, NES, SNES, Genesis)"}</strong>
+                    <Fish size={30} className="empty-fish" />
+                    <strong>{isLaunching ? "Preparing core" : "This tank is empty — drop in a ROM"}</strong>
+                    {!isLaunching && <small>GBA · GB · GBC · NES · SNES · Genesis</small>}
                     <button className="primary-button" onClick={() => romInputRef.current?.click()}>
                       <Upload size={16} />
                       ROM
@@ -1188,6 +1211,14 @@ export default function App() {
                 <span>In</span>
                 <Upload size={12} />
               </button>
+              <button
+                className="checkpoint utility"
+                title="Import a battery save (.sav) from another emulator"
+                onClick={() => sramInputRef.current?.click()}
+              >
+                <span>Sav</span>
+                <Upload size={12} />
+              </button>
             </div>
           </section>
         </aside>
@@ -1196,12 +1227,25 @@ export default function App() {
       {view === "tank" && (
         <>
           <div className="tank-ambient" aria-hidden>
+            <div className="rays" />
+            <div className="sand far" />
+            <span className="weed w1" />
+            <span className="weed w2" />
+            <span className="weed w3" />
+            <span className="weed w4" />
+            <span className="weed w5" />
+            <span className="weed w6" />
+            <div className="sand" />
             <span className="bubble b1" />
             <span className="bubble b2" />
             <span className="bubble b3" />
             <span className="bubble b4" />
             <span className="bubble b5" />
             <span className="bubble b6" />
+            <span className="bubble b7" />
+            <span className="bubble b8" />
+            <span className="bubble b9" />
+            <div className="vignette" />
           </div>
 
           <div className="tank-hud">
@@ -1213,11 +1257,11 @@ export default function App() {
             </div>
             <div className="hud-actions">
               {mode === "autopilot" ? (
-                <button onClick={() => setMode("intervention")} disabled={!isLoaded} title="Pause the agent">
+                <button className="hud-pause" onClick={() => setMode("intervention")} disabled={!isLoaded} title="Pause the agent">
                   <Pause size={14} />
                 </button>
               ) : (
-                <button onClick={() => setMode("autopilot")} disabled={!isLoaded} title="Let the agent swim">
+                <button className="hud-resume" onClick={() => setMode("autopilot")} disabled={!isLoaded} title="Let the agent swim">
                   <Play size={14} />
                 </button>
               )}
@@ -1260,7 +1304,9 @@ export default function App() {
 
           <div className={`tank-caption ${lastEvent?.tone ?? "system"}`}>
             <span>{activeProfile.agentName}</span>
-            <p>{lastEvent?.text ?? "Drop a ROM in and the tank starts swimming on its own."}</p>
+            <p className="thought-line" key={lastEvent?.id ?? "empty"}>
+              {lastEvent?.text ?? "Drop a ROM in and the tank starts swimming on its own."}
+            </p>
           </div>
 
           <div className="tank-shelf" aria-label="Tanks">
@@ -1305,6 +1351,13 @@ export default function App() {
         ref={stateInputRef}
         type="file"
         onChange={(event) => void importState(event.target.files?.[0])}
+        hidden
+      />
+      <input
+        ref={sramInputRef}
+        type="file"
+        accept=".sav,.srm,.sram,application/octet-stream"
+        onChange={(event) => void importSram(event.target.files?.[0])}
         hidden
       />
     </main>
