@@ -1284,3 +1284,364 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ---------------------------------------------------------------- */
+/* Tank view: the passive ambient fishtank                          */
+/* ---------------------------------------------------------------- */
+
+.tank-view.hybrid-app {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  background: radial-gradient(120% 90% at 50% 0%, #14324a 0%, #0b1d30 48%, #060e1a 100%);
+}
+
+.tank-view .gt-header,
+.tank-view .right-console,
+.tank-view .intervention-deck,
+.tank-view .profile-dock,
+.tank-view .agent-thought,
+.tank-view .stage-rulers,
+.tank-view .emulator-status,
+.tank-view .corner-caption {
+  display: none;
+}
+
+.tank-view .gt-body {
+  display: block;
+  overflow: hidden;
+}
+
+.tank-view .tank-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: clamp(40px, 9vh, 72px) clamp(10px, 3vw, 32px) clamp(84px, 16vh, 132px);
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.tank-view .tank-center {
+  display: grid;
+  grid-template-columns: 100%;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.tank-view .emulator-object {
+  width: min(100%, calc((100vh - 190px) * 1.5), 1100px);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgb(140 200 255 / 22%);
+  border-radius: 10px;
+  background: rgb(8 20 34 / 65%);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 40%),
+    0 18px 60px rgb(0 0 0 / 55%),
+    0 0 90px rgb(64 156 255 / 14%);
+}
+
+.tank-view .screen-frame {
+  border: 0;
+}
+
+.tank-view .scanlines {
+  opacity: 0.12;
+}
+
+.tank-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bubble {
+  position: absolute;
+  bottom: -40px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 32% 30%,
+    rgb(255 255 255 / 26%),
+    rgb(255 255 255 / 5%) 60%,
+    transparent 70%
+  );
+  animation: bubble-rise linear infinite;
+}
+
+.b1 { left: 8%;  width: 14px; height: 14px; animation-duration: 19s; }
+.b2 { left: 22%; width: 8px;  height: 8px;  animation-duration: 26s; animation-delay: 6s; }
+.b3 { left: 47%; width: 11px; height: 11px; animation-duration: 22s; animation-delay: 11s; }
+.b4 { left: 68%; width: 7px;  height: 7px;  animation-duration: 28s; animation-delay: 3s; }
+.b5 { left: 84%; width: 12px; height: 12px; animation-duration: 21s; animation-delay: 14s; }
+.b6 { left: 93%; width: 9px;  height: 9px;  animation-duration: 25s; animation-delay: 8s; }
+
+@keyframes bubble-rise {
+  0%   { transform: translateY(0) translateX(0); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { transform: translateY(calc(-100vh - 80px)) translateX(24px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble {
+    display: none;
+  }
+}
+
+.tank-hud {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100vw - 20px);
+  transform: translateX(-50%);
+  border: 1px solid rgb(150 200 255 / 20%);
+  border-radius: 999px;
+  background: rgb(6 14 26 / 78%);
+  backdrop-filter: blur(10px);
+  color: rgb(220 236 255 / 92%);
+  padding: 6px 10px 6px 16px;
+  font-family: var(--mono);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.tank-view:hover .tank-hud,
+.tank-hud:focus-within {
+  opacity: 1;
+}
+
+.hud-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hud-left strong {
+  overflow: hidden;
+  max-width: 34vw;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hud-status {
+  color: rgb(160 200 240 / 75%);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.hud-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.hud-actions button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(150 200 255 / 22%);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 6%);
+  color: inherit;
+  cursor: pointer;
+}
+
+.hud-actions button:hover:not(:disabled) {
+  background: rgb(120 190 255 / 22%);
+}
+
+.hud-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.hud-actions button.active {
+  border-color: rgb(140 245 200 / 55%);
+  background: rgb(120 190 255 / 30%);
+}
+
+.tank-caption {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  z-index: 65;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  max-width: min(560px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  color: rgb(205 228 252 / 88%);
+  font-family: var(--mono);
+  text-align: center;
+  opacity: 0.6;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.tank-view:hover .tank-caption {
+  opacity: 1;
+}
+
+.tank-caption span {
+  color: rgb(140 190 235 / 65%);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.tank-caption p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tank-caption.risk p {
+  color: #ffb3a7;
+}
+
+.tank-whisper {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  z-index: 70;
+  width: min(420px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.tank-view:hover .tank-whisper,
+.tank-whisper:focus-within {
+  opacity: 1;
+}
+
+.tank-whisper input {
+  width: 100%;
+  border: 1px solid rgb(150 200 255 / 20%);
+  border-radius: 999px;
+  background: rgb(6 14 26 / 78%);
+  color: rgb(220 236 255 / 92%);
+  padding: 9px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.tank-whisper input::placeholder {
+  color: rgb(150 195 240 / 45%);
+}
+
+.tank-whisper input:focus {
+  border-color: rgb(150 200 255 / 45%);
+}
+
+.tank-shelf {
+  position: fixed;
+  top: 50%;
+  left: 10px;
+  z-index: 70;
+  display: grid;
+  gap: 6px;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+.tank-view:hover .tank-shelf,
+.tank-shelf:focus-within {
+  opacity: 1;
+}
+
+.shelf-tank {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 150px;
+  border: 1px solid rgb(150 200 255 / 18%);
+  border-radius: 8px;
+  background: rgb(6 14 26 / 72%);
+  color: rgb(205 228 252 / 85%);
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.shelf-tank span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-tank:hover {
+  background: rgb(120 190 255 / 16%);
+}
+
+.shelf-tank.active {
+  border-color: rgb(140 245 200 / 55%);
+  color: var(--signal);
+}
+
+.shelf-tank.add {
+  justify-content: center;
+}
+
+.tank-return {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: var(--white);
+  color: var(--ink);
+  padding: 6px 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tank-return:hover {
+  background: var(--signal);
+}
+
+@media (max-width: 620px) {
+  .hud-status {
+    display: none;
+  }
+
+  .tank-shelf {
+    top: auto;
+    bottom: 58px;
+    transform: none;
+  }
+
+  .tank-caption {
+    bottom: 96px;
+  }
+
+  .tank-view .tank-stage {
+    padding-bottom: clamp(120px, 22vh, 160px);
+  }
+}

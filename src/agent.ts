@@ -61,7 +61,7 @@ export function nextAgentAction(goal: string, tick: number, observation?: Screen
   const wantsCatch = includesAny(normalized, ["catch", "capture", "find", "nidorino", "encounter"]);
   const wantsGrind = includesAny(normalized, ["level", "grind", "evolve", "train", "xp", "ev"]);
 
-  if (guardrail && tick > 0 && tick % 18 === 0) {
+  if (guardrail && tick > 0 && tick % 150 === 0) {
     return {
       label: "Guardrail check",
       thought: withVision(

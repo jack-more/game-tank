@@ -8,12 +8,16 @@ import {
   Box,
   Circle,
   Download,
+  Fish,
   Gamepad2,
   Maximize2,
   Minimize2,
   Pause,
+  PictureInPicture2,
   Play,
   Plus,
+  Save,
+  SlidersHorizontal,
   Upload,
   Zap,
 } from "lucide-react";
@@ -32,6 +36,42 @@ import type { AgentMode, AgentProfile, ButtonName, SaveSlot, ScreenMode, ScreenO
 
 type EmulatorInstance = Awaited<ReturnType<typeof Nostalgist.launch>>;
 type CommandMode = "queue" | "now";
+type ViewMode = "tank" | "console";
+
+type LaunchOptions = {
+  resume?: boolean;
+  autopilot?: boolean;
+};
+
+const VIEW_KEY = "gametank.view";
+
+const coreByExtension: Record<string, string> = {
+  gba: "mgba",
+  gb: "mgba",
+  gbc: "mgba",
+  sgb: "mgba",
+  nes: "fceumm",
+  fds: "fceumm",
+  sfc: "snes9x",
+  smc: "snes9x",
+  snes: "snes9x",
+  md: "genesis_plus_gx",
+  gen: "genesis_plus_gx",
+  smd: "genesis_plus_gx",
+  sms: "genesis_plus_gx",
+  gg: "genesis_plus_gx",
+};
+
+const romAccept = `.${Object.keys(coreByExtension).join(",.")},application/octet-stream`;
+
+function coreForRom(name?: string) {
+  const extension = name?.split(".").pop()?.toLowerCase() ?? "";
+  return coreByExtension[extension] ?? "mgba";
+}
+
+function stripRomExtension(name: string) {
+  return name.replace(/\.[a-z0-9]+$/i, "");
+}
 
 const buttonIcons: Partial<Record<ButtonName, ReactNode>> = {
   up: <ArrowUp size={16} />,
@@ -69,6 +109,10 @@ export default function App() {
   const [isLaunching, setIsLaunching] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [cornerMode, setCornerMode] = useState(false);
+  const [view, setView] = useState<ViewMode>(() =>
+    localStorage.getItem(VIEW_KEY) === "console" ? "console" : "tank",
+  );
+  const [isPip, setIsPip] = useState(false);
   const [status, setStatus] = useState("Standby");
   const [romSize, setRomSize] = useState<number>();
   const [commandDraft, setCommandDraft] = useState("");
@@ -81,6 +125,8 @@ export default function App() {
   const screenObservationRef = useRef<ScreenObservation | undefined>(undefined);
   const romInputRef = useRef<HTMLInputElement | null>(null);
   const stateInputRef = useRef<HTMLInputElement | null>(null);
+  const pipVideoRef = useRef<HTMLVideoElement | null>(null);
+  const autoLaunchRef = useRef(false);
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeId) ?? profiles[0],
@@ -101,10 +147,35 @@ export default function App() {
     };
   }, []);
 
-  function updateActiveProfile(updater: (profile: AgentProfile) => AgentProfile) {
+  useEffect(() => {
+    localStorage.setItem(VIEW_KEY, view);
+  }, [view]);
+
+  useEffect(() => {
+    const playing = isLoaded && activeProfile?.mode === "autopilot";
+    document.title = isLoaded
+      ? `${playing ? "▶" : "⏸"} ${activeProfile?.gameName ?? "Game Tank"} · Game Tank`
+      : "Game Tank";
+  }, [isLoaded, activeProfile?.mode, activeProfile?.gameName]);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setView("tank");
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
+
+  function updateProfileById(id: string, updater: (profile: AgentProfile) => AgentProfile) {
     setProfiles((current) =>
-      current.map((profile) => (profile.id === activeProfile.id ? updater(profile) : profile)),
+      current.map((profile) => (profile.id === id ? updater(profile) : profile)),
     );
+  }
+
+  function updateActiveProfile(updater: (profile: AgentProfile) => AgentProfile) {
+    updateProfileById(activeProfile.id, updater);
   }
 
   function logEvent(tone: Parameters<typeof addProfileEvent>[1], text: string) {
@@ -225,7 +296,7 @@ export default function App() {
     }
   }
 
-  async function launchProfile(profile = activeProfile) {
+  async function launchProfile(profile = activeProfile, options: LaunchOptions = {}) {
     if (!profile?.romKey || !canvasRef.current) return;
 
     setIsLaunching(true);
@@ -245,7 +316,7 @@ export default function App() {
 
       const instance = await Nostalgist.launch({
         element: canvasRef.current,
-        core: "mgba",
+        core: coreForRom(profile.romName),
         rom: romFile,
         sram,
         sramType: "sav",
@@ -263,14 +334,29 @@ export default function App() {
       });
 
       emulatorRef.current = instance;
+
+      if (options.resume && profile.saves[0]) {
+        const state = await getBlob(profile.saves[0].stateKey);
+        if (state) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+          await instance.loadState(state);
+        }
+      }
+
       setIsLoaded(true);
-      setStatus("Ready");
+      setStatus(options.autopilot ? "Agent swimming" : "Ready");
       setIsLaunching(false);
-      updateActiveProfile((current) =>
+      updateProfileById(profile.id, (current) =>
         addProfileEvent(
-          { ...current, gameName: profile.romName?.replace(/\.gba$/i, "") ?? current.gameName },
+          {
+            ...current,
+            gameName: profile.romName ? stripRomExtension(profile.romName) : current.gameName,
+            mode: options.autopilot ? "autopilot" : current.mode,
+          },
           "system",
-          "GBA core attached.",
+          options.resume && profile.saves[0]
+            ? "Tank resumed from the last checkpoint."
+            : "Core attached. Tank is live.",
         ),
       );
     } catch (error) {
@@ -278,7 +364,27 @@ export default function App() {
       setStatus(message);
       setIsLoaded(false);
       setIsLaunching(false);
-      logEvent("risk", message);
+      updateProfileById(profile.id, (current) => addProfileEvent(current, "risk", message));
+    }
+  }
+
+  useEffect(() => {
+    if (autoLaunchRef.current) return;
+    autoLaunchRef.current = true;
+    const profile = profiles.find((candidate) => candidate.id === activeId) ?? profiles[0];
+    if (!profile?.romKey) return;
+    window.setTimeout(() => void launchProfile(profile, { resume: true, autopilot: true }), 50);
+  }, []);
+
+  function switchTank(profile: AgentProfile) {
+    if (profile.id === activeProfile.id) return;
+    setActiveId(profile.id);
+    setIsLoaded(false);
+    setStatus("Standby");
+    void emulatorRef.current?.exit();
+    emulatorRef.current = null;
+    if (profile.romKey) {
+      window.setTimeout(() => void launchProfile(profile, { resume: true, autopilot: true }), 60);
     }
   }
 
@@ -295,7 +401,7 @@ export default function App() {
           ...profile,
           romKey: key,
           romName: file.name,
-          gameName: file.name.replace(/\.gba$/i, ""),
+          gameName: stripRomExtension(file.name),
           updatedAt: Date.now(),
         },
         "system",
@@ -303,7 +409,14 @@ export default function App() {
       ),
     );
 
-    setTimeout(() => void launchProfile({ ...activeProfile, romKey: key, romName: file.name }), 50);
+    setTimeout(
+      () =>
+        void launchProfile(
+          { ...activeProfile, romKey: key, romName: file.name },
+          { autopilot: true },
+        ),
+      50,
+    );
   }
 
   async function press(button: ButtonName, time = 110) {
@@ -435,10 +548,10 @@ export default function App() {
     );
   }
 
-  async function saveState() {
+  async function saveState(name?: string, silent = false) {
     if (!emulatorRef.current) return;
 
-    setStatus("Saving state");
+    if (!silent) setStatus("Saving state");
     const { state, thumbnail } = await emulatorRef.current.saveState();
     const stateKey = `${activeProfile.id}.state.${Date.now()}`;
     const thumbnailKey = thumbnail ? `${stateKey}.thumb` : undefined;
@@ -456,7 +569,7 @@ export default function App() {
 
     const slot: SaveSlot = {
       id: crypto.randomUUID(),
-      name: `State ${activeProfile.saves.length + 1}`,
+      name: name ?? `State ${activeProfile.saves.length + 1}`,
       createdAt: Date.now(),
       stateKey,
       thumbnailKey,
@@ -475,7 +588,51 @@ export default function App() {
       ),
     );
 
-    setStatus("State saved");
+    if (!silent) setStatus("State saved");
+  }
+
+  useEffect(() => {
+    if (!isLoaded || activeProfile?.mode !== "autopilot") return;
+
+    const timer = window.setInterval(() => {
+      void saveState("Ambient checkpoint", true);
+    }, 180000);
+
+    return () => window.clearInterval(timer);
+  }, [isLoaded, activeProfile?.id, activeProfile?.mode]);
+
+  async function togglePictureInPicture() {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture().catch(() => undefined);
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas || !isLoaded) return;
+
+    try {
+      let video = pipVideoRef.current;
+      if (!video) {
+        video = document.createElement("video");
+        video.muted = true;
+        video.playsInline = true;
+        video.style.position = "fixed";
+        video.style.width = "1px";
+        video.style.opacity = "0";
+        video.style.pointerEvents = "none";
+        video.addEventListener("leavepictureinpicture", () => setIsPip(false));
+        document.body.appendChild(video);
+        pipVideoRef.current = video;
+      }
+
+      video.srcObject = canvas.captureStream(30);
+      await video.play();
+      await video.requestPictureInPicture();
+      setIsPip(true);
+      logEvent("system", "Tank floated onto the desktop.");
+    } catch {
+      setStatus("Float window unavailable here");
+    }
   }
 
   async function loadSave(slot = activeProfile.saves[0]) {
@@ -685,8 +842,17 @@ export default function App() {
   const lastEvent = activeProfile?.events[0];
   const mode = activeProfile?.mode ?? "standby";
 
+  const rootClass = [
+    "app",
+    "hybrid-app",
+    view === "tank" ? "tank-view" : "",
+    cornerMode && view === "console" ? "corner-mode" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <main className={cornerMode ? "app hybrid-app corner-mode" : "app hybrid-app"}>
+    <main className={rootClass}>
       <header className="gt-header">
         <div className="brand-lockup">
           <div className="brand-glyph">
@@ -698,6 +864,10 @@ export default function App() {
         </div>
 
         <div className="header-meta">
+          <button className="tank-return" onClick={() => setView("tank")} title="Back to the tank (Esc)">
+            <Fish size={14} />
+            Tank
+          </button>
           <div className="agent-state">
             <span className={`pulse ${mode}`} />
             <span>Agent {mode === "autopilot" ? "active" : mode} : {status}</span>
@@ -717,12 +887,7 @@ export default function App() {
               <button
                 className={profile.id === activeProfile.id ? "dock-agent active" : "dock-agent"}
                 key={profile.id}
-                onClick={() => {
-                  setActiveId(profile.id);
-                  setIsLoaded(false);
-                  setStatus("Standby");
-                  void emulatorRef.current?.exit();
-                }}
+                onClick={() => switchTank(profile)}
               >
                 <Bot size={14} />
                 <span>{profile.agentName}</span>
@@ -766,7 +931,7 @@ export default function App() {
                 {!isLoaded && (
                   <div className="empty-screen">
                     <Box size={28} />
-                    <strong>{isLaunching ? "Preparing core" : "Mount a .gba file"}</strong>
+                    <strong>{isLaunching ? "Preparing core" : "Drop in a ROM (GBA, GB, NES, SNES, Genesis)"}</strong>
                     <button className="primary-button" onClick={() => romInputRef.current?.click()}>
                       <Upload size={16} />
                       ROM
@@ -1028,7 +1193,96 @@ export default function App() {
         </aside>
       </div>
 
-      {lastEvent && cornerMode && (
+      {view === "tank" && (
+        <>
+          <div className="tank-ambient" aria-hidden>
+            <span className="bubble b1" />
+            <span className="bubble b2" />
+            <span className="bubble b3" />
+            <span className="bubble b4" />
+            <span className="bubble b5" />
+            <span className="bubble b6" />
+          </div>
+
+          <div className="tank-hud">
+            <div className="hud-left">
+              <Fish size={15} />
+              <strong>{activeProfile.gameName}</strong>
+              <span className={`pulse ${mode}`} />
+              <span className="hud-status">{status}</span>
+            </div>
+            <div className="hud-actions">
+              {mode === "autopilot" ? (
+                <button onClick={() => setMode("intervention")} disabled={!isLoaded} title="Pause the agent">
+                  <Pause size={14} />
+                </button>
+              ) : (
+                <button onClick={() => setMode("autopilot")} disabled={!isLoaded} title="Let the agent swim">
+                  <Play size={14} />
+                </button>
+              )}
+              <button onClick={() => void saveState()} disabled={!isLoaded} title="Checkpoint now">
+                <Save size={14} />
+              </button>
+              <button
+                onClick={() => void togglePictureInPicture()}
+                disabled={!isLoaded}
+                className={isPip ? "active" : ""}
+                title="Float the tank on your desktop"
+              >
+                <PictureInPicture2 size={14} />
+              </button>
+              <button onClick={() => romInputRef.current?.click()} title="Mount a different ROM">
+                <Upload size={14} />
+              </button>
+              <button onClick={() => setView("console")} title="Open the full console">
+                <SlidersHorizontal size={14} />
+              </button>
+            </div>
+          </div>
+
+          <form
+            className="tank-whisper"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const text = commandDraft.trim();
+              if (!text) return;
+              setCommandDraft("");
+              setOverrideInstruction(text);
+            }}
+          >
+            <input
+              value={commandDraft}
+              onChange={(event) => setCommandDraft(event.target.value)}
+              placeholder="Whisper to the tank..."
+            />
+          </form>
+
+          <div className={`tank-caption ${lastEvent?.tone ?? "system"}`}>
+            <span>{activeProfile.agentName}</span>
+            <p>{lastEvent?.text ?? "Drop a ROM in and the tank starts swimming on its own."}</p>
+          </div>
+
+          <div className="tank-shelf" aria-label="Tanks">
+            {profiles.map((profile) => (
+              <button
+                key={profile.id}
+                className={profile.id === activeProfile.id ? "shelf-tank active" : "shelf-tank"}
+                onClick={() => switchTank(profile)}
+                title={profile.romName ?? "Empty tank"}
+              >
+                <Fish size={12} />
+                <span>{profile.gameName}</span>
+              </button>
+            ))}
+            <button className="shelf-tank add" onClick={addProfile} title="New tank">
+              <Plus size={12} />
+            </button>
+          </div>
+        </>
+      )}
+
+      {lastEvent && cornerMode && view === "console" && (
         <div className={`corner-caption ${lastEvent.tone}`}>
           <div>
             <strong>{status}</strong>
@@ -1043,7 +1297,7 @@ export default function App() {
       <input
         ref={romInputRef}
         type="file"
-        accept=".gba,application/octet-stream"
+        accept={romAccept}
         onChange={(event) => void handleRomFile(event.target.files?.[0])}
         hidden
       />

@@ -1,4 +1,4 @@
-const CACHE_NAME = "game-tank-shell-v1";
+const CACHE_NAME = "game-tank-shell-v2";
 const scope = self.registration.scope;
 const APP_SHELL = [scope, `${scope}manifest.webmanifest`, `${scope}icon.svg`];
 
