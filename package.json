@@ -9,6 +9,7 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@vitejs/plugin-react": "^6.0.2",
     "lucide-react": "^0.511.0",
     "nostalgist": "^0.21.1",

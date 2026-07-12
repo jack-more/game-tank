@@ -5,6 +5,8 @@ import {
   ArrowRight,
   ArrowUp,
   Bot,
+  Box,
+  Brain,
   Circle,
   Download,
   Fish,
@@ -23,6 +25,13 @@ import {
 import { Nostalgist } from "nostalgist";
 import { buttonLabel, nextAgentAction, wantsGuardrail } from "./agent";
 import { hasSuspendedAudio, resumeAllAudio } from "./audio";
+import {
+  brainErrorMessage,
+  decideNextMove,
+  loadBrainSettings,
+  saveBrainSettings,
+  type BrainSettings,
+} from "./brain";
 import {
   addProfileEvent,
   createProfile,
@@ -44,6 +53,7 @@ type LaunchOptions = {
 };
 
 const VIEW_KEY = "gametank.view";
+const DIORAMA_KEY = "gametank.diorama";
 
 const coreByExtension: Record<string, string> = {
   gba: "mgba",
@@ -112,8 +122,10 @@ export default function App() {
   const [view, setView] = useState<ViewMode>(() =>
     localStorage.getItem(VIEW_KEY) === "console" ? "console" : "tank",
   );
+  const [diorama, setDiorama] = useState(() => localStorage.getItem(DIORAMA_KEY) === "1");
   const [isPip, setIsPip] = useState(false);
   const [needsWake, setNeedsWake] = useState(false);
+  const [brainSettings, setBrainSettings] = useState<BrainSettings>(() => loadBrainSettings());
   const [status, setStatus] = useState("Standby");
   const [romSize, setRomSize] = useState<number>();
   const [commandDraft, setCommandDraft] = useState("");
@@ -130,6 +142,8 @@ export default function App() {
   const pipVideoRef = useRef<HTMLVideoElement | null>(null);
   const autoLaunchRef = useRef(false);
   const launchTokenRef = useRef(0);
+  const brainInFlightRef = useRef(false);
+  const brainFailuresRef = useRef(0);
 
   const activeProfile = useMemo(
     () => profiles.find((profile) => profile.id === activeId) ?? profiles[0],
@@ -153,6 +167,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view);
   }, [view]);
+
+  useEffect(() => {
+    saveBrainSettings(brainSettings);
+  }, [brainSettings]);
+
+  useEffect(() => {
+    localStorage.setItem(DIORAMA_KEY, diorama ? "1" : "0");
+  }, [diorama]);
 
   useEffect(() => {
     const playing = isLoaded && activeProfile?.mode === "autopilot";
@@ -306,6 +328,28 @@ export default function App() {
         sampledAt: Date.now(),
         summary: "vision sample unavailable",
       };
+    }
+  }
+
+  function captureScreenPng(): string | undefined {
+    const canvas = canvasRef.current;
+    if (!canvas || !isLoaded) return undefined;
+
+    const sourceWidth = canvas.width || canvas.clientWidth;
+    const sourceHeight = canvas.height || canvas.clientHeight;
+    if (!sourceWidth || !sourceHeight) return undefined;
+
+    try {
+      const sample = document.createElement("canvas");
+      sample.width = 320;
+      sample.height = Math.max(1, Math.round(320 * (sourceHeight / sourceWidth)));
+      const context = sample.getContext("2d");
+      if (!context) return undefined;
+      context.imageSmoothingEnabled = false;
+      context.drawImage(canvas, 0, 0, sample.width, sample.height);
+      return sample.toDataURL("image/png").split(",")[1];
+    } catch {
+      return undefined;
     }
   }
 
@@ -515,6 +559,11 @@ export default function App() {
   useEffect(() => {
     if (!activeProfile || activeProfile.mode !== "autopilot" || !isLoaded) return;
 
+    const brainActive = brainSettings.enabled && brainSettings.apiKey.trim().length > 0;
+    const tickMs = brainActive
+      ? Math.max(brainSettings.paceSeconds * 1000, 3000)
+      : activeProfile.paceMs;
+
     let cancelled = false;
     const timer = window.setInterval(() => {
       const observation = observeScreen();
@@ -522,6 +571,69 @@ export default function App() {
         screenObservationRef.current = observation;
         setScreenObservation(observation);
       }
+
+      if (brainActive) {
+        if (brainInFlightRef.current) return;
+        const screenPng = captureScreenPng();
+        if (!screenPng) return;
+
+        brainInFlightRef.current = true;
+        const profileId = activeProfile.id;
+        decideNextMove(brainSettings, {
+          gameName: activeProfile.gameName,
+          goal: activeProfile.goal,
+          stopRules: activeProfile.stopRules,
+          queue: activeProfile.goalQueue,
+          liveInstruction: activeProfile.liveInstruction,
+          recentEvents: activeProfile.events
+            .filter((event) => event.tone === "agent")
+            .slice(0, 5)
+            .map((event) => event.text),
+          screenPng,
+        })
+          .then((decision) => {
+            if (cancelled) return;
+            brainFailuresRef.current = 0;
+
+            if (decision.needsHuman) {
+              setStatus("Agent asked for you");
+              updateProfileById(profileId, (profile) =>
+                addProfileEvent(
+                  { ...profile, mode: "intervention", ticks: profile.ticks + 1 },
+                  "risk",
+                  decision.thought,
+                ),
+              );
+              return;
+            }
+
+            setStatus(decision.buttons.length ? `Pressing ${decision.buttons.join(" ")}` : "Watching");
+            updateProfileById(profileId, (profile) =>
+              addProfileEvent({ ...profile, ticks: profile.ticks + 1 }, "agent", decision.thought),
+            );
+            void runButtons(decision.buttons);
+          })
+          .catch((error) => {
+            if (cancelled) return;
+            brainFailuresRef.current += 1;
+            const message = brainErrorMessage(error);
+            if (brainFailuresRef.current >= 3) {
+              setBrainSettings((current) => ({ ...current, enabled: false }));
+              setStatus("Brain paused");
+              updateProfileById(profileId, (profile) =>
+                addProfileEvent(profile, "risk", `Brain paused after repeated errors: ${message}`),
+              );
+              brainFailuresRef.current = 0;
+            } else {
+              setStatus("Brain hiccup, retrying");
+            }
+          })
+          .finally(() => {
+            brainInFlightRef.current = false;
+          });
+        return;
+      }
+
       const action = nextAgentAction(objectiveText, activeProfile.ticks, observation ?? screenObservationRef.current);
 
       if (action.risk) {
@@ -544,7 +656,7 @@ export default function App() {
       if (!cancelled) {
         void runButtons(action.buttons);
       }
-    }, activeProfile.paceMs);
+    }, tickMs);
 
     return () => {
       cancelled = true;
@@ -557,6 +669,7 @@ export default function App() {
     activeProfile?.ticks,
     isLoaded,
     objectiveText,
+    brainSettings,
   ]);
 
   function setMode(mode: AgentMode) {
@@ -892,6 +1005,7 @@ export default function App() {
     "app",
     "hybrid-app",
     view === "tank" ? "tank-view" : "",
+    view === "tank" && diorama ? "diorama" : "",
     cornerMode && view === "console" ? "corner-mode" : "",
   ]
     .filter(Boolean)
@@ -986,6 +1100,21 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {view === "tank" && diorama && (
+                <div className="glass-box" aria-hidden>
+                  <div className="tank-base" />
+                  <div className="tank-plaque">GAME TANK</div>
+                  <div className="glass-wall north" />
+                  <div className="glass-wall south" />
+                  <div className="glass-wall west" />
+                  <div className="glass-wall east" />
+                  <div className="grass-fringe north" />
+                  <div className="grass-fringe south" />
+                  <div className="grass-fringe west" />
+                  <div className="grass-fringe east" />
+                </div>
+              )}
             </div>
 
             <div className="intervention-deck">
@@ -1176,6 +1305,63 @@ export default function App() {
             </div>
           </section>
 
+          <section className="directive-block brain-panel">
+            <div className="section-header brain-header">
+              <span>
+                <Brain size={12} /> AI Brain
+              </span>
+              <strong className={brainSettings.enabled && brainSettings.apiKey ? "on" : ""}>
+                {brainSettings.enabled && brainSettings.apiKey ? "Claude" : "Reflex"}
+              </strong>
+            </div>
+            <div className="brain-stack">
+              <label className="brain-toggle">
+                <input
+                  type="checkbox"
+                  checked={brainSettings.enabled}
+                  onChange={(event) =>
+                    setBrainSettings({ ...brainSettings, enabled: event.target.checked })
+                  }
+                />
+                <span>Let Claude read the screen and play</span>
+              </label>
+              <input
+                className="brain-key"
+                type="password"
+                value={brainSettings.apiKey}
+                onChange={(event) => setBrainSettings({ ...brainSettings, apiKey: event.target.value })}
+                placeholder="Anthropic API key (sk-ant-...)"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <div className="brain-row">
+                <select
+                  value={brainSettings.model}
+                  onChange={(event) => setBrainSettings({ ...brainSettings, model: event.target.value })}
+                >
+                  <option value="claude-opus-4-8">Opus 4.8 — smartest</option>
+                  <option value="claude-sonnet-5">Sonnet 5 — balanced</option>
+                  <option value="claude-haiku-4-5">Haiku 4.5 — cheapest</option>
+                </select>
+                <select
+                  value={brainSettings.paceSeconds}
+                  onChange={(event) =>
+                    setBrainSettings({ ...brainSettings, paceSeconds: Number(event.target.value) })
+                  }
+                >
+                  <option value={4}>Move every 4s</option>
+                  <option value={8}>Move every 8s</option>
+                  <option value={15}>Move every 15s</option>
+                </select>
+              </div>
+              <p className="brain-note">
+                Your key stays in this browser and is sent only to api.anthropic.com. Rough cost at the
+                4s pace: Opus ~$5/hr, Sonnet ~$3/hr, Haiku ~$1/hr — slower paces cost proportionally
+                less. Without a key, the tank uses the built-in reflex agent.
+              </p>
+            </div>
+          </section>
+
           <section className="telemetry-panel">
             <div className="section-header live-header">
               <span>03 Live Log</span>
@@ -1304,6 +1490,13 @@ export default function App() {
               )}
               <button onClick={() => void saveState()} disabled={!isLoaded} title="Checkpoint now">
                 <Save size={14} />
+              </button>
+              <button
+                onClick={() => setDiorama((value) => !value)}
+                className={diorama ? "active" : ""}
+                title="Diorama mode"
+              >
+                <Box size={14} />
               </button>
               <button
                 onClick={() => void togglePictureInPicture()}
